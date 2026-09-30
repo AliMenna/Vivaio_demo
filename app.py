@@ -24,7 +24,14 @@ STATUS_COLORS = {'vigorous': '#2ecc71', 'normal': '#f1c40f', 'stressed': '#e74c3
 def load_data():
     inventory = pd.read_csv("inventario_app.csv")
     block_mapping = pd.read_csv("mappatura_blocchi.csv")
-    contours = gpd.read_file("contorni_tutte_piante.geojson")
+
+    with open("contorni_tutte_piante.geojson") as f:
+        geojson_data = json.load(f)
+    contours = pd.DataFrame([
+        {'plant_id': feat['properties']['plant_id'], 'geometry': shape(feat['geometry'])}
+        for feat in geojson_data['features']
+    ])
+
     preview = Image.open("preview_rgb.png")
     with open("block_boundaries.json") as f:
         block_boundaries = json.load(f)
