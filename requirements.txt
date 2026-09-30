@@ -4,3 +4,4 @@ numpy
 geopandas
 pillow
 matplotlib
+plotly
