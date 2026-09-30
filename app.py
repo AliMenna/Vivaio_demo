@@ -5,6 +5,7 @@ import geopandas as gpd
 from PIL import Image
 import plotly.graph_objects as go
 import json
+from shapely.geometry import shape
 
 st.set_page_config(page_title="Nursery - Exploratory Demo", layout="wide")
 
