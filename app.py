@@ -31,6 +31,7 @@ def load_data():
         {'plant_id': feat['properties']['plant_id'], 'geometry': shape(feat['geometry'])}
         for feat in geojson_data['features']
     ])
+    contours['plant_id'] = contours['plant_id'].astype(int)
 
     preview = Image.open("preview_rgb.png")
     with open("block_boundaries.json") as f:
