@@ -97,6 +97,8 @@ if "selected_plant" not in st.session_state:
 tab1, tab2 = st.tabs(["🗺️ Block Explorer", "🩺 Health & Verification"])
 
 with tab1:
+    st.metric("Total plants in this block", len(block_health))
+
     col_map, col_zoom = st.columns([1, 1])
 
     with col_map:
@@ -117,9 +119,8 @@ with tab1:
             xaxis=dict(visible=False), yaxis=dict(visible=False, scaleanchor='x', autorange='reversed')
         )
         st.plotly_chart(fig_overview, use_container_width=True)
-        st.caption(f"**{selected_block}** — {len(block_health)} plants "
-                   f"(🟢 {counts.get('vigorous', 0)} vigorous · 🟡 {counts.get('normal', 0)} normal · "
-                   f"🔴 {counts.get('stressed', 0)} possibly stressed)")
+        st.caption(f"**{selected_block}** — 🟢 {counts.get('vigorous', 0)} vigorous · "
+                   f"🟡 {counts.get('normal', 0)} normal · 🔴 {counts.get('stressed', 0)} possibly stressed")
 
     with col_zoom:
         st.subheader(f"Zoom on {selected_block} — click a plant")
@@ -183,11 +184,26 @@ with tab1:
             prow = prow.iloc[0]
             st.markdown("---")
             st.subheader(f"Plant {pid}")
+
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("NDVI", f"{prow['ndvi']:.3f}")
             c2.metric("Status", prow['health_status'].capitalize())
             c3.metric("Leaf temperature", f"{prow['tir_mean']:.1f}°C" if pd.notna(prow['tir_mean']) else "n/a")
             c4.metric("NDVI z-score", f"{prow['ndvi_zscore']:.2f}")
+
+            c5, c6, c7 = st.columns(3)
+            c5.metric("Canopy area", f"{prow['area_m2']:.2f} m²")
+
+            if pd.notna(prow.get('altezza_media_m')):
+                confidence_label = prow['confidenza_altezza'] if pd.notna(prow.get('confidenza_altezza')) else "n/a"
+                height_display = f"{prow['altezza_media_m']:.2f} m"
+                if prow['altezza_media_m'] < 0:
+                    height_display += " ⚠️"
+                c6.metric("Height", height_display, help=f"Confidence: {confidence_label}")
+            else:
+                c6.metric("Height", "n/a")
+
+            c7.metric("Crown diameter", f"{prow['diametro_chioma_m']:.2f} m")
 
 with tab2:
     st.subheader(f"Health overview — {selected_block}")
