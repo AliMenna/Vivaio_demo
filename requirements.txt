@@ -1,7 +1,7 @@
 streamlit
 pandas
 numpy
-geopandas
+shapely
 pillow
 matplotlib
 plotly
