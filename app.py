@@ -39,6 +39,46 @@ def load_data():
     return inventory, block_mapping, contours, preview, block_boundaries
 
 
+@st.cache_data
+def compute_physical_thresholds(inventory):
+    """25th/75th percentiles across the whole nursery, used to describe a
+    plant's canopy area/diameter/height as small/medium/large."""
+    return {
+        'area_m2': (inventory['area_m2'].quantile(0.25), inventory['area_m2'].quantile(0.75)),
+        'diametro_chioma_m': (inventory['diametro_chioma_m'].quantile(0.25),
+                                inventory['diametro_chioma_m'].quantile(0.75)),
+        'altezza_media_m': (inventory['altezza_media_m'].quantile(0.25),
+                             inventory['altezza_media_m'].quantile(0.75)),
+    }
+
+
+def size_label(value, low, high):
+    if pd.isna(value):
+        return None
+    if value < low:
+        return "small"
+    elif value > high:
+        return "large"
+    return "medium-sized"
+
+
+def build_plant_summary(prow, thresholds):
+    """Plain-language sentence describing this plant's canopy size and height."""
+    area_label = size_label(prow['area_m2'], *thresholds['area_m2'])
+    height_val = prow.get('altezza_media_m')
+    height_label = None
+    if pd.notna(height_val) and height_val >= 0:
+        height_label = size_label(height_val, *thresholds['altezza_media_m'])
+
+    if area_label and height_label:
+        return (f"This plant has a **{area_label} canopy** and is **{height_label}** "
+                f"compared to other plants in the nursery.")
+    elif area_label:
+        return (f"This plant has a **{area_label} canopy** compared to other plants in the "
+                f"nursery. Height data isn't available for this plant.")
+    return "Not enough data to describe this plant's overall size."
+
+
 def compute_block_health(block_plant_ids, inventory):
     df = inventory[inventory['plant_id'].isin(block_plant_ids)].copy()
     mean_ndvi, std_ndvi = df['ndvi'].mean(), df['ndvi'].std()
@@ -56,8 +96,6 @@ def compute_block_health(block_plant_ids, inventory):
 
 
 def explain_block_variability(mean_ndvi, std_ndvi, min_ndvi, max_ndvi, low_confidence):
-    """Clear, non-technical explanation of the block's overall health signal
-    and how much we can trust it."""
     if mean_ndvi > NDVI_HIGH_THRESHOLD:
         level, meaning = "high", "most plants in this block look vigorous and densely leaved"
     elif mean_ndvi < NDVI_LOW_THRESHOLD:
@@ -95,9 +133,6 @@ def compute_cwsi(t_plant, t_ref_healthy, t_dry):
 
 def build_zoom_figure(selected_block, block_boundaries, preview_img, color_by_status=False,
                        block_contours=None):
-    """Builds the zoomed-in map for a block. If color_by_status is True, contours
-    are colored by health status (Tab 2); otherwise a single neutral color is used
-    (Tab 1, physical inventory)."""
     pad = 0.15
     rows_full = block_boundaries[selected_block][:, 0]
     cols_full = block_boundaries[selected_block][:, 1]
@@ -168,6 +203,7 @@ def extract_selected_id(event):
 # --- Load data ---
 inventory, block_mapping, contours, preview_img, block_boundaries = load_data()
 T_DRY_GLOBAL = inventory['tir_mean'].quantile(0.99)
+PHYSICAL_THRESHOLDS = compute_physical_thresholds(inventory)
 
 st.title("🌿 Nursery — Exploratory Demo")
 
@@ -232,17 +268,25 @@ with tab1:
             prow = prow.iloc[0]
             st.markdown("---")
             st.subheader(f"Plant {pid} — physical characteristics")
+            st.write(build_plant_summary(prow, PHYSICAL_THRESHOLDS))
+
             c1, c2, c3 = st.columns(3)
-            c1.metric("Canopy area", f"{prow['area_m2']:.2f} m²")
-            c2.metric("Crown diameter", f"{prow['diametro_chioma_m']:.2f} m")
-            if pd.notna(prow.get('altezza_media_m')):
-                confidence_label = prow['confidenza_altezza'] if pd.notna(prow.get('confidenza_altezza')) else "n/a"
-                height_display = f"{prow['altezza_media_m']:.2f} m"
-                if prow['altezza_media_m'] < 0:
-                    height_display += " ⚠️"
-                c3.metric("Height", height_display, help=f"Reliability of this measurement: {confidence_label}")
-            else:
-                c3.metric("Height", "n/a")
+            with c1:
+                st.metric("Canopy area", f"{prow['area_m2']:.2f} m²")
+                st.caption("The ground area covered by this plant's foliage, seen from above.")
+            with c2:
+                st.metric("Crown diameter", f"{prow['diametro_chioma_m']:.2f} m")
+                st.caption("The width of the canopy — how wide the plant spreads.")
+            with c3:
+                if pd.notna(prow.get('altezza_media_m')) and prow['altezza_media_m'] >= 0:
+                    confidence_label = prow['confidenza_altezza'] if pd.notna(prow.get('confidenza_altezza')) else "n/a"
+                    st.metric("Height", f"{prow['altezza_media_m']:.2f} m",
+                              help=f"Reliability of this measurement: {confidence_label}")
+                    st.caption(f"Estimated from drone elevation data. Reliability: {confidence_label}.")
+                else:
+                    st.metric("Height", "n/a")
+                    st.caption("Height couldn't be reliably measured for this plant "
+                               "(e.g. due to limited elevation data coverage).")
 
 # ============================================================
 # TAB 2 — health status
