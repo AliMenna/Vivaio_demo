@@ -79,6 +79,8 @@ def explain_ndvi_range(mean_ndvi, min_ndvi, max_ndvi):
 st.title("🌿 Nursery — Exploratory Demo")
 
 inventory, block_mapping, contours, preview, block_boundaries = load_data()
+st.write(contours.columns.tolist())
+st.write(contours.head())
 
 st.header("Block Health Overview")
 
