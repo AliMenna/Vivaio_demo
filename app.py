@@ -15,7 +15,7 @@ NDVI_HIGH_THRESHOLD = 0.929
 NDVI_LOW_THRESHOLD = 0.752
 SOGLIA_STRESS = -1.5
 SOGLIA_OTTIMALE = 1.0
-CWSI_STRESS_THRESHOLD = 0.5  # heuristic: above this, CWSI suggests water stress
+CWSI_STRESS_THRESHOLD = 0.5
 
 STATUS_COLORS = {'vigorous': '#2ecc71', 'normal': '#f1c40f', 'stressed': '#e74c3c'}
 
@@ -25,7 +25,7 @@ def load_data():
     inventory = pd.read_csv("inventario_app.csv")
     block_mapping = pd.read_csv("mappatura_blocchi.csv")
 
-    with open("contorni_tutte_piante.geojson") as f:
+    with open("contorni_tutte_piante.geojson", encoding="utf-8-sig") as f:
         geojson_data = json.load(f)
     contours = pd.DataFrame([
         {'plant_id': feat['properties']['plant_id'], 'geometry': shape(feat['geometry'])}
@@ -34,7 +34,7 @@ def load_data():
     contours['plant_id'] = contours['plant_id'].astype(int)
 
     preview = np.array(Image.open("preview_rgb.png"))
-    with open("block_boundaries.json") as f:
+    with open("block_boundaries.json", encoding="utf-8-sig") as f:
         block_boundaries = {k: np.array(v) for k, v in json.load(f).items()}
     return inventory, block_mapping, contours, preview, block_boundaries
 
@@ -76,7 +76,7 @@ def compute_cwsi(t_plant, t_ref_healthy, t_dry):
 
 # --- Load data ---
 inventory, block_mapping, contours, preview_img, block_boundaries = load_data()
-T_DRY_GLOBAL = inventory['tir_mean'].quantile(0.99)  # heuristic proxy for "max stress" reference
+T_DRY_GLOBAL = inventory['tir_mean'].quantile(0.99)
 
 st.title("🌿 Nursery — Exploratory Demo")
 
@@ -96,9 +96,6 @@ if "selected_plant" not in st.session_state:
 
 tab1, tab2 = st.tabs(["🗺️ Block Explorer", "🩺 Health & Verification"])
 
-# ============================================================
-# TAB 1 — overview map + zoomed block view + click-to-inspect
-# ============================================================
 with tab1:
     col_map, col_zoom = st.columns([1, 1])
 
@@ -192,9 +189,6 @@ with tab1:
             c3.metric("Leaf temperature", f"{prow['tir_mean']:.1f}°C" if pd.notna(prow['tir_mean']) else "n/a")
             c4.metric("NDVI z-score", f"{prow['ndvi_zscore']:.2f}")
 
-# ============================================================
-# TAB 2 — health overview + temperature-based verification
-# ============================================================
 with tab2:
     st.subheader(f"Health overview — {selected_block}")
     st.write(explain_ndvi_range(mean_ndvi, block_health['ndvi'].min(), block_health['ndvi'].max()))
