@@ -140,7 +140,7 @@ for status, color in STATUS_COLORS.items():
     subset = block_contours[block_contours['health_status'] == status]
     xs, ys = [], []
     for _, row in subset.iterrows():
-        coords = np.array(row.geometry.exterior.coords) / ORTHO_SCALE
+        coords = np.array(row['geometry'].exterior.coords) / ORTHO_SCALE
         xs.extend(coords[:, 0].tolist() + [None])
         ys.extend(coords[:, 1].tolist() + [None])
 
@@ -152,15 +152,20 @@ for status, color in STATUS_COLORS.items():
 
     if len(subset) > 0:
         hover = []
+        centroid_x, centroid_y = [], []
         for _, row in subset.iterrows():
+            c = row['geometry'].centroid
+            centroid_x.append(c.x / ORTHO_SCALE)
+            centroid_y.append(c.y / ORTHO_SCALE)
+
             temp_str = f"{row['tir_mean']:.1f}°C" if pd.notna(row['tir_mean']) else "not available"
             hover.append(
                 f"<b>Plant {row['plant_id']}</b><br>NDVI: {row['ndvi']:.3f}<br>"
                 f"Status: {status}<br>Leaf temperature: {temp_str}"
             )
-        centroids = subset.geometry.centroid
+
         fig.add_trace(go.Scatter(
-            x=(centroids.x / ORTHO_SCALE), y=(centroids.y / ORTHO_SCALE),
+            x=centroid_x, y=centroid_y,
             mode='markers', marker=dict(size=6, color=color, opacity=0),
             hovertext=hover, hoverinfo='text', showlegend=False
         ))
