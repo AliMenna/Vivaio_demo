@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.set_page_config(page_title="Vivaio - Stato di Salute", layout="wide")
+st.set_page_config(page_title="Nursery - Exploratory Demo", layout="wide")
 
-st.title("🌿 Vivaio — Demo Stato di Salute")
-st.write("Deploy funzionante. Prossimo passo: caricare i dati reali.")
+st.title("🌿 Nursery — Exploratory Demo")
+st.write("Deployment working. Next step: load real data.")
