@@ -89,6 +89,7 @@ block_ids = block_mapping[block_mapping['blocco'] == selected_block]['plant_id']
 block_health, mean_ndvi, std_ndvi = compute_block_health(block_ids, inventory)
 block_health = block_health.merge(inventory[['plant_id', 'tir_mean']], on='plant_id', how='left')
 
+
 low_confidence = std_ndvi < STD_MINIMA_AFFIDABILE
 range_explanation = explain_ndvi_range(mean_ndvi, block_health['ndvi'].min(), block_health['ndvi'].max())
 counts = block_health['health_status'].value_counts()
