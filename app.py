@@ -41,7 +41,8 @@ def load_data():
 
 def compute_block_health(block_plant_ids, inventory):
     """Compute NDVI-based health status for each plant in a block, using
-    z-score relative to the block's own mean/std."""
+    z-score relative to the block's own mean/std. tir_mean is already
+    present in `inventory`, so it comes along automatically."""
     df = inventory[inventory['plant_id'].isin(block_plant_ids)].copy()
     mean_ndvi = df['ndvi'].mean()
     std_ndvi = df['ndvi'].std()
@@ -80,8 +81,6 @@ def explain_ndvi_range(mean_ndvi, min_ndvi, max_ndvi):
 st.title("🌿 Nursery — Exploratory Demo")
 
 inventory, block_mapping, contours, preview, block_boundaries = load_data()
-st.write(contours.columns.tolist())
-st.write(contours.head())
 
 st.header("Block Health Overview")
 
@@ -90,8 +89,6 @@ selected_block = st.selectbox("Select a block", available_blocks)
 
 block_ids = block_mapping[block_mapping['blocco'] == selected_block]['plant_id']
 block_health, mean_ndvi, std_ndvi = compute_block_health(block_ids, inventory)
-block_health = block_health.merge(inventory[['plant_id', 'tir_mean']], on='plant_id', how='left')
-
 
 low_confidence = std_ndvi < STD_MINIMA_AFFIDABILE
 range_explanation = explain_ndvi_range(mean_ndvi, block_health['ndvi'].min(), block_health['ndvi'].max())
