@@ -96,6 +96,9 @@ if "selected_plant" not in st.session_state:
 
 tab1, tab2 = st.tabs(["🗺️ Block Explorer", "🩺 Health & Verification"])
 
+# ============================================================
+# TAB 1 — physical inventory: map, zoom, click-to-inspect plant
+# ============================================================
 with tab1:
     st.metric("Total plants in this block", len(block_health))
 
@@ -151,7 +154,7 @@ with tab1:
                 cx.append(c.x / ORTHO_SCALE - c_min_p)
                 cy.append(c.y / ORTHO_SCALE - r_min_p)
                 ids.append(int(row['plant_id']))
-                hover.append(f"Plant {int(row['plant_id'])} — {status}")
+                hover.append(f"Plant {int(row['plant_id'])}")
 
             fig_zoom.add_trace(go.Scatter(
                 x=xs, y=ys, mode='lines', fill='toself',
@@ -175,36 +178,33 @@ with tab1:
         if event and event.get("selection", {}).get("points"):
             point = event["selection"]["points"][0]
             if "customdata" in point:
-                st.session_state.selected_plant = point["customdata"][0]
+                cd = point["customdata"]
+                st.session_state.selected_plant = cd[0] if isinstance(cd, (list, tuple)) else cd
 
     if st.session_state.selected_plant is not None:
         pid = st.session_state.selected_plant
-        prow = block_health[block_health['plant_id'] == pid]
+        prow = inventory[inventory['plant_id'] == pid]
         if not prow.empty:
             prow = prow.iloc[0]
             st.markdown("---")
-            st.subheader(f"Plant {pid}")
+            st.subheader(f"Plant {pid} — physical characteristics")
 
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("NDVI", f"{prow['ndvi']:.3f}")
-            c2.metric("Status", prow['health_status'].capitalize())
-            c3.metric("Leaf temperature", f"{prow['tir_mean']:.1f}°C" if pd.notna(prow['tir_mean']) else "n/a")
-            c4.metric("NDVI z-score", f"{prow['ndvi_zscore']:.2f}")
-
-            c5, c6, c7 = st.columns(3)
-            c5.metric("Canopy area", f"{prow['area_m2']:.2f} m²")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Canopy area", f"{prow['area_m2']:.2f} m²")
+            c2.metric("Crown diameter", f"{prow['diametro_chioma_m']:.2f} m")
 
             if pd.notna(prow.get('altezza_media_m')):
                 confidence_label = prow['confidenza_altezza'] if pd.notna(prow.get('confidenza_altezza')) else "n/a"
                 height_display = f"{prow['altezza_media_m']:.2f} m"
                 if prow['altezza_media_m'] < 0:
                     height_display += " ⚠️"
-                c6.metric("Height", height_display, help=f"Confidence: {confidence_label}")
+                c3.metric("Height", height_display, help=f"Confidence: {confidence_label}")
             else:
-                c6.metric("Height", "n/a")
+                c3.metric("Height", "n/a")
 
-            c7.metric("Crown diameter", f"{prow['diametro_chioma_m']:.2f} m")
-
+# ============================================================
+# TAB 2 — health status, NDVI explanation, temperature check
+# ============================================================
 with tab2:
     st.subheader(f"Health overview — {selected_block}")
     st.write(explain_ndvi_range(mean_ndvi, block_health['ndvi'].min(), block_health['ndvi'].max()))
@@ -215,6 +215,20 @@ with tab2:
             "to each other. Small, perfectly normal differences might be flagged as a warning "
             "by mistake. We recommend using the temperature check below before drawing conclusions."
         )
+
+    if st.session_state.selected_plant is not None:
+        pid = st.session_state.selected_plant
+        prow = block_health[block_health['plant_id'] == pid]
+        if not prow.empty:
+            prow = prow.iloc[0]
+            st.markdown("---")
+            st.subheader(f"Plant {pid} — health status")
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("NDVI", f"{prow['ndvi']:.3f}")
+            c2.metric("Status", prow['health_status'].capitalize())
+            c3.metric("Leaf temperature", f"{prow['tir_mean']:.1f}°C" if pd.notna(prow['tir_mean']) else "n/a")
+            c4.metric("NDVI z-score", f"{prow['ndvi_zscore']:.2f}")
 
     st.markdown("---")
     st.subheader("🌡️ Additional check: leaf temperature")
