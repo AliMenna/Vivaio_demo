@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import json
 from shapely.geometry import shape
 
-st.set_page_config(page_title="Nursery - Exploratory Demo", layout="wide")
+st.set_page_config(page_title="Nursery Explorer", page_icon="🌿", layout="wide")
 
 ORTHO_SCALE = 4.228
 
@@ -291,19 +291,123 @@ def describe_uncertainty(prow):
                    "(from the darkest to the brightest part).")
 
 
+CUSTOM_CSS = """
+<style>
+:root {
+  --green-900:#0f3d27; --green-700:#1b7f4b; --green-500:#4fae7a; --green-100:#e6f2ea;
+  --ink:#1f2a24; --muted:#5d6b63; --card:#ffffff;
+}
+/* page background + hide the default Streamlit chrome so it feels like a website */
+.stApp {background: radial-gradient(1200px 500px at 85% -10%, rgba(79,174,122,0.18), transparent 60%),
+                    linear-gradient(180deg, #eaf3ec 0%, #f6f9f5 420px, #f6f9f5 100%);}
+header[data-testid="stHeader"], [data-testid="stToolbar"], #MainMenu, footer {display: none !important;}
+.block-container {padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1400px;}
+html, body, [class*="css"] {color: var(--ink);}
+h1, h2, h3, h4, h5 {letter-spacing: -0.3px;}
+
+/* hero banner */
+.hero {border-radius: 22px; padding: 2.4rem 2.6rem; margin-bottom: 1.2rem; color: #fff; position: relative; overflow: hidden;
+       background: linear-gradient(120deg, var(--green-900) 0%, var(--green-700) 55%, var(--green-500) 100%);
+       box-shadow: 0 10px 30px rgba(15,61,39,0.25);}
+.hero::after {content: ""; position: absolute; inset: 0; pointer-events: none;
+       background: radial-gradient(circle at 90% 20%, rgba(255,255,255,0.18), transparent 40%),
+                   radial-gradient(circle at 70% 110%, rgba(255,255,255,0.12), transparent 45%);}
+.hero .eyebrow {text-transform: uppercase; letter-spacing: 2px; font-size: 0.78rem; opacity: 0.8; margin-bottom: 0.4rem;}
+.hero h1 {color: #fff; font-size: 2.6rem; font-weight: 800; margin: 0 0 0.4rem 0; padding: 0;}
+.hero p {font-size: 1.1rem; opacity: 0.92; max-width: 760px; margin: 0 0 1.1rem 0;}
+.hero .pills {display: flex; flex-wrap: wrap; gap: 0.6rem;}
+.hero .pill {background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.28);
+             padding: 0.35rem 0.9rem; border-radius: 999px; font-size: 0.9rem; backdrop-filter: blur(4px);}
+
+/* tabs as a pill navigation bar */
+div[data-baseweb="tab-list"], [role="tablist"] {gap: 0.5rem; background: var(--card); padding: 0.4rem; border-radius: 999px;
+       width: fit-content; box-shadow: 0 2px 10px rgba(0,0,0,0.06); margin-bottom: 0.8rem;}
+button[data-baseweb="tab"], [data-testid="stTab"] {border-radius: 999px; padding: 0.45rem 1.3rem; font-size: 1rem; height: auto;}
+button[data-baseweb="tab"][aria-selected="true"], [data-testid="stTab"][aria-selected="true"] {background: var(--green-700); color: #fff;}
+button[data-baseweb="tab"][aria-selected="true"] p, [data-testid="stTab"][aria-selected="true"] p {color: #fff;}
+div[data-baseweb="tab-highlight"], div[data-baseweb="tab-border"], [data-testid="stTabs"] [role="tablist"] + div {display: none;}
+
+/* cards */
+div[data-testid="stVerticalBlockBorderWrapper"], [class*="st-key-card_"] {background: var(--card); border-radius: 18px;
+       border: 1px solid rgba(15,61,39,0.08); box-shadow: 0 4px 18px rgba(15,61,39,0.07); padding: 0.9rem 1rem;}
+div[data-testid="stMetric"] {background: var(--green-100); padding: 0.8rem 1rem; border-radius: 14px;}
+div[data-testid="stMetricLabel"] {opacity: 0.8;}
+div[data-baseweb="select"] > div {border-radius: 12px;}
+
+/* KPI tiles */
+.kpi-row {display: flex; flex-wrap: wrap; gap: 0.8rem; margin: 0.2rem 0 1rem 0;}
+.kpi {flex: 1 1 150px; border-radius: 16px; padding: 0.9rem 1.1rem; background: var(--card);
+      box-shadow: 0 4px 18px rgba(15,61,39,0.07); border-top: 5px solid var(--c, #999);}
+.kpi .v {font-size: 1.9rem; font-weight: 800; line-height: 1.1;}
+.kpi .l {font-size: 0.85rem; color: var(--muted);}
+.hint {color: var(--muted); font-size: 0.95rem; text-align: center; padding: 0.6rem;}
+.site-footer {margin-top: 2.5rem; padding: 1.2rem 0 0.4rem 0; border-top: 1px solid rgba(15,61,39,0.15);
+              color: var(--muted); font-size: 0.85rem; text-align: center;}
+</style>
+"""
+
+
+def kpi_row(items):
+    """items: list of (label, value, colour). Colour-coded summary tiles."""
+    html = '<div class="kpi-row">' + "".join(
+        f'<div class="kpi" style="--c:{c}"><div class="v">{v}</div><div class="l">{l}</div></div>'
+        for l, v, c in items) + '</div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def build_overview_figure(boundary_fullres, preview_img):
+    """Whole-nursery preview with the selected block outlined."""
+    boundary = boundary_fullres / ORTHO_SCALE
+    bx = boundary[:, 1].tolist() + [boundary[0, 1]]
+    by = boundary[:, 0].tolist() + [boundary[0, 0]]
+    fig = go.Figure()
+    fig.add_trace(go.Image(z=preview_img))
+    fig.add_trace(go.Scatter(x=bx, y=by, mode='lines', fill='toself',
+                             line=dict(color='white', width=2), fillcolor='rgba(255,255,255,0.15)',
+                             hoverinfo='skip', showlegend=False))
+    fig.update_layout(height=450, margin=dict(l=0, r=0, t=0, b=0),
+                      xaxis=dict(visible=False),
+                      yaxis=dict(visible=False, scaleanchor='x', autorange='reversed'))
+    return fig
+
+
 # --- Load data ---
 inventory, block_mapping, contours, preview_img, block_boundaries, verdict = load_data()
 T_DRY_GLOBAL = inventory['tir_mean'].quantile(0.99)
 PHYSICAL_THRESHOLDS = compute_physical_thresholds(inventory)
 SPECTRA = load_spectra()
 
-st.title("🌿 Nursery — Exploratory Demo")
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
+# ---------------- Header ----------------
+n_all = len(inventory)
 available_blocks = [b for b in sorted(block_mapping['blocco'].unique()) if b in block_boundaries]
 skipped_blocks = sorted(set(block_mapping['blocco'].unique()) - set(available_blocks))
+
+st.markdown(f"""
+<div class="hero">
+  <div class="eyebrow">Precision agriculture · drone multispectral imaging</div>
+  <h1>🌿 Nursery Explorer</h1>
+  <p>Explore every plant of the nursery: how big it is, what light it reflects, and how healthy it looks —
+     block by block, straight from the drone images.</p>
+  <div class="pills">
+    <span class="pill">🌱 {n_all:,} plants mapped</span>
+    <span class="pill">🧭 {len(available_blocks)} blocks analysed</span>
+    <span class="pill">🛰️ 9-band multispectral + thermal</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+sel_l, sel_r = st.columns([1, 3], vertical_alignment="center")
+with sel_l:
+    selected_block = st.selectbox("Choose a block", available_blocks,
+                                  format_func=lambda b: b.replace('blocco_', 'Block ').replace('_', ' '))
+with sel_r:
+    st.markdown('<p class="hint" style="text-align:left;margin:1.6rem 0 0 0;">'
+                'Pick a block, then click a plant on the zoom map to open its card.</p>',
+                unsafe_allow_html=True)
 if skipped_blocks:
     st.warning(f"Blocks without a boundary in block_boundaries.json are hidden: {', '.join(map(str, skipped_blocks))}")
-selected_block = st.selectbox("Select a block", available_blocks)
 
 block_ids = block_mapping[block_mapping['blocco'] == selected_block]['plant_id']
 block_health, mean_ndvi, std_ndvi, n_not_assessed = build_block_health(block_ids, inventory, verdict)
@@ -326,178 +430,164 @@ tab1, tab2 = st.tabs(["🌳 Physical Inventory", "🩺 Health Status"])
 # TAB 1 — physical characteristics
 # ============================================================
 with tab1:
-    st.metric("Total plants in this block", len(block_health))
+    kpi_row([("Plants in this block", len(block_health), "#2c7a4b")])
 
-    col_map, col_zoom = st.columns([1, 1])
+    col_map, col_zoom = st.columns([1, 1], gap="large")
     with col_map:
-        st.subheader("Nursery overview")
-        boundary = block_boundaries[selected_block] / ORTHO_SCALE
-        bx = boundary[:, 1].tolist() + [boundary[0, 1]]
-        by = boundary[:, 0].tolist() + [boundary[0, 0]]
-        fig_overview = go.Figure()
-        fig_overview.add_trace(go.Image(z=preview_img))
-        fig_overview.add_trace(go.Scatter(
-            x=bx, y=by, mode='lines', fill='toself',
-            line=dict(color='white', width=2), fillcolor='rgba(255,255,255,0.15)',
-            hoverinfo='skip', showlegend=False
-        ))
-        fig_overview.update_layout(
-            height=450, margin=dict(l=0, r=0, t=10, b=0),
-            xaxis=dict(visible=False), yaxis=dict(visible=False, scaleanchor='x', autorange='reversed')
-        )
-        st.plotly_chart(fig_overview, use_container_width=True, key="overview_tab1")
-
+        with st.container(border=True, key="card_1"):
+            st.markdown("##### Nursery overview")
+            st.plotly_chart(build_overview_figure(block_boundaries[selected_block], preview_img),
+                            use_container_width=True, key="overview_tab1")
     with col_zoom:
-        st.subheader(f"Zoom on {selected_block} — click a plant")
-        fig_zoom_inv = build_zoom_figure(selected_block, block_boundaries, preview_img,
-                                           color_by_status=False, block_contours=block_contours)
-        event_inv = st.plotly_chart(fig_zoom_inv, use_container_width=True,
-                                      on_select="rerun", key="zoom_inventory")
-        pid = extract_selected_id(event_inv)
-        if pid is not None:
-            st.session_state.plant_inventory = pid
+        with st.container(border=True, key="card_2"):
+            st.markdown("##### Block zoom")
+            st.caption("Click a plant to see its details below.")
+            fig_zoom_inv = build_zoom_figure(selected_block, block_boundaries, preview_img,
+                                             color_by_status=False, block_contours=block_contours)
+            event_inv = st.plotly_chart(fig_zoom_inv, use_container_width=True,
+                                        on_select="rerun", key="zoom_inventory")
+            pid = extract_selected_id(event_inv)
+            if pid is not None:
+                st.session_state.plant_inventory = pid
 
     if st.session_state.plant_inventory is not None:
         pid = st.session_state.plant_inventory
         prow = inventory[inventory['plant_id'] == pid]
         if not prow.empty:
             prow = prow.iloc[0]
-            st.markdown("---")
-            st.subheader(f"Plant {pid} — physical characteristics")
-            st.write(build_plant_summary(prow, PHYSICAL_THRESHOLDS))
-
-            c1, c2 = st.columns(2)
-            with c1:
-                st.metric("Canopy area", f"{prow['area_m2']:.2f} m²")
-                st.caption("The ground area covered by this plant's foliage, seen from above.")
-            with c2:
-                st.metric("Crown diameter", f"{prow['diametro_chioma_m']:.2f} m")
-                st.caption("The width of the canopy — how wide the plant spreads.")
-
-            if SPECTRA is not None:
-                st.markdown("##### Reflectance spectrum")
-                if pid in SPECTRA.index and SPECTRA.loc[pid, BAND_COLS].notna().all():
-                    st.plotly_chart(build_spectrum_figure(pid, SPECTRA, block_ids),
-                                    use_container_width=True, key=f"spectrum_{pid}")
-                    st.caption("Fraction of light reflected by the canopy in each of the 9 bands of the multispectral "
-                               "camera (blue to near-infrared), averaged over the inner part of the crown. "
-                               "Healthy foliage reflects little red light and a lot of near-infrared. "
-                               "The grey band shows where most plants of the block lie.")
-                else:
-                    st.info("Reflectance spectrum not available for this plant.")
+            with st.container(border=True, key="card_3"):
+                st.markdown(f"### 🌱 Plant {pid}")
+                st.write(build_plant_summary(prow, PHYSICAL_THRESHOLDS))
+                c_left, c_right = st.columns([1, 2], gap="large")
+                with c_left:
+                    st.metric("Canopy area", f"{prow['area_m2']:.2f} m²",
+                              help="The ground area covered by this plant's foliage, seen from above.")
+                    st.metric("Crown diameter", f"{prow['diametro_chioma_m']:.2f} m",
+                              help="The width of the canopy — how wide the plant spreads.")
+                with c_right:
+                    if SPECTRA is not None:
+                        st.markdown("**Reflectance spectrum**")
+                        if pid in SPECTRA.index and SPECTRA.loc[pid, BAND_COLS].notna().all():
+                            st.plotly_chart(build_spectrum_figure(pid, SPECTRA, block_ids),
+                                            use_container_width=True, key=f"spectrum_{pid}")
+                            st.caption("Share of light reflected by the canopy in each of the 9 bands of the "
+                                       "multispectral camera (blue to near-infrared), averaged over the inner part "
+                                       "of the crown. Healthy foliage reflects little red light and a lot of "
+                                       "near-infrared. The grey band shows where most plants of the block lie.")
+                        else:
+                            st.info("Reflectance spectrum not available for this plant.")
+    else:
+        st.markdown('<p class="hint">👆 Click a plant on the zoom map to see its size and spectrum.</p>',
+                    unsafe_allow_html=True)
 
 # ============================================================
 # TAB 2 — health status
 # ============================================================
 with tab2:
-    st.subheader(f"Health overview — {selected_block}")
-    st.markdown(explain_block_variability(mean_ndvi, std_ndvi,
-                                            block_health['ndvi'].min(), block_health['ndvi'].max(),
-                                            low_confidence))
+    kpi_row([
+        ("Vigorous", counts.get('vigorous', 0), STATUS_COLORS['vigorous']),
+        ("Normal", counts.get('normal', 0), STATUS_COLORS['normal']),
+        ("Possibly stressed", counts.get('stressed', 0), STATUS_COLORS['stressed']),
+        ("Verdict sensitive to light", n_uncertain, "#222222"),
+    ])
+    if n_not_assessed:
+        st.caption(f"{n_not_assessed} {'plant' if n_not_assessed == 1 else 'plants'} in this block could not be "
+                   f"assessed (too few canopy pixels).")
 
-    st.markdown("---")
-    col_map2, col_zoom2 = st.columns([1, 1])
+    with st.container(border=True, key="card_4"):
+        st.markdown(f"##### Health overview — {selected_block.replace('blocco_', 'Block ')}")
+        st.markdown(explain_block_variability(mean_ndvi, std_ndvi,
+                                              block_health['ndvi'].min(), block_health['ndvi'].max(),
+                                              low_confidence))
+
+    col_map2, col_zoom2 = st.columns([1, 1], gap="large")
     with col_map2:
-        st.subheader("Block status at a glance")
-        st.write(f"🟢 Vigorous: {counts.get('vigorous', 0)}  ·  "
-                 f"🟡 Normal: {counts.get('normal', 0)}  ·  "
-                 f"🔴 Possibly stressed: {counts.get('stressed', 0)}")
-        st.write(f"⭕ Verdict sensitive to light inside the canopy: **{n_uncertain}**")
-        if n_not_assessed:
-            st.caption(f"{n_not_assessed} plants in this block could not be assessed (too few canopy pixels).")
-        show_moderate = st.checkbox("Also mark somewhat uncertain plants (3 of 4 light levels agree)", value=False)
-        with st.expander("How is the uncertainty computed?"):
-            st.markdown(
-                "Parts of a canopy are lit and parts are in shade, and shade changes the colour signal. "
-                "For every plant we split its canopy into **four light levels** (darkest to brightest quarter) and "
-                "recompute the health status in each. If the status is the same in all four, the verdict is **stable**. "
-                "If it changes in at least half of them, the plant is marked with a **black ring** and its "
-                "status is double-checked using only the **sunlit half** of the canopy: "
-                "if the status stays the same the result is confirmed, otherwise we report the sunlit-half status. "
-                "The other plants keep the verdict computed on the whole canopy."
-            )
-        boundary = block_boundaries[selected_block] / ORTHO_SCALE
-        bx = boundary[:, 1].tolist() + [boundary[0, 1]]
-        by = boundary[:, 0].tolist() + [boundary[0, 0]]
-        fig_overview2 = go.Figure()
-        fig_overview2.add_trace(go.Image(z=preview_img))
-        fig_overview2.add_trace(go.Scatter(
-            x=bx, y=by, mode='lines', fill='toself',
-            line=dict(color='white', width=2), fillcolor='rgba(255,255,255,0.15)',
-            hoverinfo='skip', showlegend=False
-        ))
-        fig_overview2.update_layout(
-            height=450, margin=dict(l=0, r=0, t=10, b=0),
-            xaxis=dict(visible=False), yaxis=dict(visible=False, scaleanchor='x', autorange='reversed')
-        )
-        st.plotly_chart(fig_overview2, use_container_width=True, key="overview_tab2")
-
+        with st.container(border=True, key="card_5"):
+            st.markdown("##### Nursery overview")
+            st.plotly_chart(build_overview_figure(block_boundaries[selected_block], preview_img),
+                            use_container_width=True, key="overview_tab2")
     with col_zoom2:
-        st.subheader(f"Zoom on {selected_block} — click a plant")
-        fig_zoom_health = build_zoom_figure(selected_block, block_boundaries, preview_img,
-                                              color_by_status=True, block_contours=block_contours,
-                                              show_moderate=show_moderate)
-        event_health = st.plotly_chart(fig_zoom_health, use_container_width=True,
-                                         on_select="rerun", key="zoom_health")
-        pid = extract_selected_id(event_health)
-        if pid is not None:
-            st.session_state.plant_health = pid
+        with st.container(border=True, key="card_6"):
+            st.markdown("##### Block zoom — colored by health status")
+            show_moderate = st.checkbox("Also mark somewhat uncertain plants (3 of 4 light levels agree)",
+                                        value=False)
+            fig_zoom_health = build_zoom_figure(selected_block, block_boundaries, preview_img,
+                                                color_by_status=True, block_contours=block_contours,
+                                                show_moderate=show_moderate)
+            event_health = st.plotly_chart(fig_zoom_health, use_container_width=True,
+                                           on_select="rerun", key="zoom_health")
+            pid = extract_selected_id(event_health)
+            if pid is not None:
+                st.session_state.plant_health = pid
+            with st.expander("How is the uncertainty computed?"):
+                st.markdown(
+                    "Parts of a canopy are lit and parts are in shade, and shade changes the colour signal. "
+                    "For every plant we split its canopy into **four light levels** (darkest to brightest quarter) and "
+                    "recompute the health status in each. If the status is the same in all four, the verdict is "
+                    "**stable**. If it changes in at least half of them, the plant is marked with a **black ring** and "
+                    "its status is double-checked using only the **sunlit half** of the canopy: if the status stays "
+                    "the same the result is confirmed, otherwise we report the sunlit-half status. "
+                    "The other plants keep the verdict computed on the whole canopy."
+                )
 
     if st.session_state.plant_health is not None:
         pid = st.session_state.plant_health
         prow = block_health[block_health['plant_id'] == pid]
         if not prow.empty:
             prow = prow.iloc[0]
-            st.markdown("---")
-            st.subheader(f"Plant {pid} — health status")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Status", prow['status_final'].capitalize())
-            c2.metric("Leaf temperature", f"{prow['tir_mean']:.1f}°C" if pd.notna(prow['tir_mean']) else "n/a")
-            c3.metric("Stability across canopy light", STABILITY_EN.get(prow['affidabilita'], "n/a"))
+            with st.container(border=True, key="card_7"):
+                st.markdown(f"### 🌱 Plant {pid}")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Status", prow['status_final'].capitalize())
+                c2.metric("Leaf temperature", f"{prow['tir_mean']:.1f}°C" if pd.notna(prow['tir_mean']) else "n/a")
+                c3.metric("Stability across canopy light", STABILITY_EN.get(prow['affidabilita'], "n/a"))
 
-            if prow['status_final'] == 'not assessed':
-                st.info("This plant could not be assessed (too few canopy pixels).")
-            else:
-                describe_uncertainty(prow)
-
-            st.markdown("---")
-            st.subheader("🌡️ Additional check: leaf temperature")
-            st.write(
-                "If you know the typical leaf temperature of a **healthy** plant of this "
-                "species, enter it below. We'll use it to double-check the result with an "
-                "independent method based on temperature, instead of leaf color."
-            )
-            ref_temp = st.number_input(
-                "Average leaf temperature of a healthy plant of this species (°C)",
-                min_value=0.0, max_value=50.0, value=None, step=0.1,
-                placeholder="e.g. 22.5", key="ref_temp_input"
-            )
-
-            if ref_temp is not None:
-                cwsi = compute_cwsi(prow['tir_mean'], ref_temp, T_DRY_GLOBAL)
-                if cwsi is None:
-                    st.info(f"No temperature data available for plant {pid} — cannot run this check.")
+                if prow['status_final'] == 'not assessed':
+                    st.info("This plant could not be assessed (too few canopy pixels).")
                 else:
-                    cwsi_says_stressed = cwsi > CWSI_STRESS_THRESHOLD
-                    ndvi_says_stressed = prow['status_final'] == 'stressed'
-                    st.metric("Water stress index (CWSI)", f"{cwsi:.2f}",
-                              help="0 = no water stress, 1 = maximum water stress")
+                    describe_uncertainty(prow)
 
-                    if cwsi_says_stressed == ndvi_says_stressed:
-                        if ndvi_says_stressed:
-                            st.error("✅ Both checks agree: this plant shows signs of stress "
-                                     "in both leaf color and temperature. Worth a closer look.")
+                with st.expander("🌡️ Additional check: leaf temperature"):
+                    st.write(
+                        "If you know the typical leaf temperature of a **healthy** plant of this "
+                        "species, enter it below. We'll use it to double-check the result with an "
+                        "independent method based on temperature, instead of leaf color."
+                    )
+                    ref_temp = st.number_input(
+                        "Average leaf temperature of a healthy plant of this species (°C)",
+                        min_value=0.0, max_value=50.0, value=None, step=0.1,
+                        placeholder="e.g. 22.5", key="ref_temp_input"
+                    )
+
+                    if ref_temp is not None:
+                        cwsi = compute_cwsi(prow['tir_mean'], ref_temp, T_DRY_GLOBAL)
+                        if cwsi is None:
+                            st.info(f"No temperature data available for plant {pid} — cannot run this check.")
                         else:
-                            st.success("✅ Both checks agree: this plant looks healthy, both "
-                                       "in leaf color and temperature.")
-                    else:
-                        st.warning(
-                            f"⚠️ The two checks disagree: leaf color suggests "
-                            f"**{'stress' if ndvi_says_stressed else 'no stress'}**, while "
-                            f"temperature suggests **{'stress' if cwsi_says_stressed else 'no stress'}**. "
-                            f"This might mean the stress is only just beginning to show in one "
-                            f"signal but not the other yet, or that the reference temperature "
-                            f"you entered isn't fully representative for this block."
-                        )
+                            cwsi_says_stressed = cwsi > CWSI_STRESS_THRESHOLD
+                            ndvi_says_stressed = prow['status_final'] == 'stressed'
+                            st.metric("Water stress index (CWSI)", f"{cwsi:.2f}",
+                                      help="0 = no water stress, 1 = maximum water stress")
+
+                            if cwsi_says_stressed == ndvi_says_stressed:
+                                if ndvi_says_stressed:
+                                    st.error("✅ Both checks agree: this plant shows signs of stress "
+                                             "in both leaf color and temperature. Worth a closer look.")
+                                else:
+                                    st.success("✅ Both checks agree: this plant looks healthy, both "
+                                               "in leaf color and temperature.")
+                            else:
+                                st.warning(
+                                    f"⚠️ The two checks disagree: leaf color suggests "
+                                    f"**{'stress' if ndvi_says_stressed else 'no stress'}**, while "
+                                    f"temperature suggests **{'stress' if cwsi_says_stressed else 'no stress'}**. "
+                                    f"This might mean the stress is only just beginning to show in one "
+                                    f"signal but not the other yet, or that the reference temperature "
+                                    f"you entered isn't fully representative for this block."
+                                )
     else:
-        st.info("Click a plant on the map above to see its health status and run the temperature check.")
+        st.markdown('<p class="hint">👆 Click a plant on the zoom map to see its health status.</p>',
+                    unsafe_allow_html=True)
+
+st.markdown('<div class="site-footer">Nursery Explorer · exploratory demo built on MAIA S2 multispectral and thermal '
+            'drone imagery · values are indicative and for research use</div>', unsafe_allow_html=True)
