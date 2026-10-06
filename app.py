@@ -18,7 +18,7 @@ CWSI_STRESS_THRESHOLD = 0.5
 STATUS_COLORS = {'vigorous': '#2ecc71', 'normal': '#f1c40f', 'stressed': '#e74c3c',
                  'not assessed': '#95a5a6'}
 CLASS_EN = {'stressata': 'stressed', 'normale': 'normal', 'vigorosa': 'vigorous'}
-RELIABILITY_EN = {'alta': 'High', 'media': 'Medium', 'bassa': 'Low'}
+STABILITY_EN = {'alta': 'Stable', 'media': 'Fairly stable', 'bassa': 'Variable'}
 
 # Plants with confidence <= UNCERTAIN_MAX are "uncertain" (their verdict was recomputed on the
 # sunlit half of the canopy); plants at 75% are "moderately uncertain" (verdict kept as is).
@@ -269,14 +269,17 @@ def describe_uncertainty(prow):
     orig, bright, final = prow['status_original'], prow['status_bright'], prow['status_final']
     level = prow['uncertainty']
     if level == 'high':
-        msg = (f"⚠️ **Uncertain verdict.** Inside the canopy of this plant, the sunlit and the shaded "
-               f"leaves give different results. Using all the canopy the plant is **{orig}**; "
-               f"using only its sunlit half it is **{bright}**.")
         if final != orig:
-            msg += f" We therefore report it as **{final}**, but the verdict should be taken with caution."
+            st.warning(
+                f"⚠️ **Verdict depends on the light.** Inside the canopy of this plant, sunlit and shaded leaves "
+                f"give different results. Using the whole canopy the plant is **{orig}**; using only its sunlit "
+                f"half it is **{bright}**. We therefore report it as **{final}**, but treat it with caution.")
         else:
-            msg += f" Both versions agree on **{final}** for the final verdict, but it is close to a class boundary."
-        st.warning(msg)
+            st.info(
+                f"🔶 **Result confirmed, but sensitive to light.** Shaded and sunlit leaves of this plant do not "
+                f"always agree, so we double-checked using only the sunlit half of the canopy. "
+                f"The status does not change: it is **{final}** either way. "
+                f"The plant is close to a class boundary, so keep an eye on it.")
     elif level == 'moderate':
         msg = ("🔸 **Fairly stable verdict.** In 3 of the 4 light levels inside the canopy the plant gets the "
                "same status; in the remaining one it is classified differently.")
@@ -284,7 +287,7 @@ def describe_uncertainty(prow):
             msg += " This plant is close to a class boundary, so it may switch with a small change in the data."
         st.info(msg)
     else:
-        st.success("✅ **Reliable verdict.** The plant gets the same status in all four light levels inside its canopy "
+        st.success("✅ **Stable verdict.** The plant gets the same status in all four light levels inside its canopy "
                    "(from the darkest to the brightest part).")
 
 
@@ -399,7 +402,7 @@ with tab2:
         st.write(f"🟢 Vigorous: {counts.get('vigorous', 0)}  ·  "
                  f"🟡 Normal: {counts.get('normal', 0)}  ·  "
                  f"🔴 Possibly stressed: {counts.get('stressed', 0)}")
-        st.write(f"⭕ Uncertain verdict (depends on light inside the canopy): **{n_uncertain}**")
+        st.write(f"⭕ Verdict sensitive to light inside the canopy: **{n_uncertain}**")
         if n_not_assessed:
             st.caption(f"{n_not_assessed} plants in this block could not be assessed (too few canopy pixels).")
         show_moderate = st.checkbox("Also mark somewhat uncertain plants (3 of 4 light levels agree)", value=False)
@@ -407,9 +410,10 @@ with tab2:
             st.markdown(
                 "Parts of a canopy are lit and parts are in shade, and shade changes the colour signal. "
                 "For every plant we split its canopy into **four light levels** (darkest to brightest quarter) and "
-                "recompute the health status in each. If the status is the same in all four, the verdict is reliable. "
-                "If it changes in at least half of them, the plant is marked as **uncertain** (black ring) and its "
-                "status is recomputed using only the **sunlit half** of the canopy. "
+                "recompute the health status in each. If the status is the same in all four, the verdict is **stable**. "
+                "If it changes in at least half of them, the plant is marked with a **black ring** and its "
+                "status is double-checked using only the **sunlit half** of the canopy: "
+                "if the status stays the same the result is confirmed, otherwise we report the sunlit-half status. "
                 "The other plants keep the verdict computed on the whole canopy."
             )
         boundary = block_boundaries[selected_block] / ORTHO_SCALE
@@ -449,7 +453,7 @@ with tab2:
             c1, c2, c3 = st.columns(3)
             c1.metric("Status", prow['status_final'].capitalize())
             c2.metric("Leaf temperature", f"{prow['tir_mean']:.1f}°C" if pd.notna(prow['tir_mean']) else "n/a")
-            c3.metric("Verdict reliability", RELIABILITY_EN.get(prow['affidabilita'], "n/a"))
+            c3.metric("Stability across canopy light", STABILITY_EN.get(prow['affidabilita'], "n/a"))
 
             if prow['status_final'] == 'not assessed':
                 st.info("This plant could not be assessed (too few canopy pixels).")
