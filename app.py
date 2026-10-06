@@ -325,7 +325,7 @@ div[data-baseweb="tab-list"], [role="tablist"] {gap: 0.5rem; background: var(--c
 button[data-baseweb="tab"], [data-testid="stTab"] {border-radius: 999px; padding: 0.45rem 1.3rem; font-size: 1rem; height: auto;}
 button[data-baseweb="tab"][aria-selected="true"], [data-testid="stTab"][aria-selected="true"] {background: var(--green-700); color: #fff;}
 button[data-baseweb="tab"][aria-selected="true"] p, [data-testid="stTab"][aria-selected="true"] p {color: #fff;}
-div[data-baseweb="tab-highlight"], div[data-baseweb="tab-border"], [data-testid="stTabs"] [role="tablist"] + div {display: none;}
+div[data-baseweb="tab-highlight"], div[data-baseweb="tab-border"] {display: none;}
 
 /* cards */
 div[data-testid="stVerticalBlockBorderWrapper"], [class*="st-key-card_"] {background: var(--card); border-radius: 18px;
@@ -386,7 +386,7 @@ skipped_blocks = sorted(set(block_mapping['blocco'].unique()) - set(available_bl
 
 st.markdown(f"""
 <div class="hero">
-  <div class="eyebrow">Precision agriculture · drone multispectral imaging</div>
+  <div class="eyebrow">Drone multispectral imaging</div>
   <h1>🌿 Nursery Explorer</h1>
   <p>Explore every plant of the nursery: how big it is, what light it reflects, and how healthy it looks —
      block by block, straight from the drone images.</p>
