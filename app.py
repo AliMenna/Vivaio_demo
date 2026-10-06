@@ -25,6 +25,10 @@ RELIABILITY_EN = {'alta': 'High', 'media': 'Medium', 'bassa': 'Low'}
 UNCERTAIN_MAX = 50
 MODERATE_MAX = 75
 
+# MAIA S2 band centres (nm); columns r443 ... r865 of spettri_piante.csv
+BAND_NM = [443, 490, 560, 665, 705, 740, 783, 842, 865]
+BAND_COLS = [f"r{w}" for w in BAND_NM]
+
 
 @st.cache_data
 def load_data():
@@ -55,6 +59,40 @@ def load_data():
     verdict = verdict[['plant_id', 'status_original', 'status_bright', 'status_final', 'uncertainty',
                        'confidenza', 'affidabilita', 'distanza_soglia', 'borderline_solo_a_75']]
     return inventory, block_mapping, contours, preview, block_boundaries, verdict
+
+
+@st.cache_data
+def load_spectra():
+    """Mean reflectance per plant in the 9 MAIA bands. Optional: returns None if the file is missing."""
+    try:
+        sp = pd.read_csv("spettri_piante.csv")
+    except FileNotFoundError:
+        return None
+    sp['plant_id'] = sp['plant_id'].astype(int)
+    return sp.set_index('plant_id')
+
+
+def build_spectrum_figure(plant_id, spectra, block_ids):
+    """Reflectance spectrum of one plant vs the typical spectrum (median and 25-75% range) of its block."""
+    ref = spectra.loc[spectra.index.isin(block_ids), BAND_COLS]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=BAND_NM, y=ref.quantile(0.75).values, mode='lines',
+                             line=dict(width=0), hoverinfo='skip', showlegend=False))
+    fig.add_trace(go.Scatter(x=BAND_NM, y=ref.quantile(0.25).values, mode='lines', line=dict(width=0),
+                             fill='tonexty', fillcolor='rgba(120,120,120,0.20)',
+                             name='Block: 25–75% of plants', hoverinfo='skip'))
+    fig.add_trace(go.Scatter(x=BAND_NM, y=ref.median().values, mode='lines',
+                             line=dict(color='#7f8c8d', width=2, dash='dash'), name='Block median',
+                             hovertemplate='%{x} nm<br>%{y:.3f}<extra>Block median</extra>'))
+    fig.add_trace(go.Scatter(x=BAND_NM, y=spectra.loc[plant_id, BAND_COLS].values, mode='lines+markers',
+                             line=dict(color='#1b7f4b', width=3), marker=dict(size=8),
+                             name=f'Plant {plant_id}',
+                             hovertemplate='%{x} nm<br>%{y:.3f}<extra>This plant</extra>'))
+    fig.update_layout(height=360, margin=dict(l=10, r=10, t=10, b=10),
+                      xaxis=dict(title='Wavelength (nm)', tickvals=BAND_NM),
+                      yaxis=dict(title='Reflectance', rangemode='tozero'),
+                      legend=dict(orientation='h', yanchor='bottom', y=1.02, x=0))
+    return fig
 
 
 @st.cache_data
@@ -254,6 +292,7 @@ def describe_uncertainty(prow):
 inventory, block_mapping, contours, preview_img, block_boundaries, verdict = load_data()
 T_DRY_GLOBAL = inventory['tir_mean'].quantile(0.99)
 PHYSICAL_THRESHOLDS = compute_physical_thresholds(inventory)
+SPECTRA = load_spectra()
 
 st.title("🌿 Nursery — Exploratory Demo")
 
@@ -331,6 +370,18 @@ with tab1:
             with c2:
                 st.metric("Crown diameter", f"{prow['diametro_chioma_m']:.2f} m")
                 st.caption("The width of the canopy — how wide the plant spreads.")
+
+            if SPECTRA is not None:
+                st.markdown("##### Reflectance spectrum")
+                if pid in SPECTRA.index and SPECTRA.loc[pid, BAND_COLS].notna().all():
+                    st.plotly_chart(build_spectrum_figure(pid, SPECTRA, block_ids),
+                                    use_container_width=True, key=f"spectrum_{pid}")
+                    st.caption("Fraction of light reflected by the canopy in each of the 9 bands of the multispectral "
+                               "camera (blue to near-infrared), averaged over the inner part of the crown. "
+                               "Healthy foliage reflects little red light and a lot of near-infrared. "
+                               "The grey band shows where most plants of the block lie.")
+                else:
+                    st.info("Reflectance spectrum not available for this plant.")
 
 # ============================================================
 # TAB 2 — health status
