@@ -13,11 +13,17 @@ ORTHO_SCALE = 4.228
 STD_MINIMA_AFFIDABILE = 0.03
 NDVI_HIGH_THRESHOLD = 0.929
 NDVI_LOW_THRESHOLD = 0.752
-SOGLIA_STRESS = -1.5
-SOGLIA_OTTIMALE = 1.0
 CWSI_STRESS_THRESHOLD = 0.5
 
-STATUS_COLORS = {'vigorous': '#2ecc71', 'normal': '#f1c40f', 'stressed': '#e74c3c'}
+STATUS_COLORS = {'vigorous': '#2ecc71', 'normal': '#f1c40f', 'stressed': '#e74c3c',
+                 'not assessed': '#95a5a6'}
+CLASS_EN = {'stressata': 'stressed', 'normale': 'normal', 'vigorosa': 'vigorous'}
+RELIABILITY_EN = {'alta': 'High', 'media': 'Medium', 'bassa': 'Low'}
+
+# Plants with confidence <= UNCERTAIN_MAX are "uncertain" (their verdict was recomputed on the
+# sunlit half of the canopy); plants at 75% are "moderately uncertain" (verdict kept as is).
+UNCERTAIN_MAX = 50
+MODERATE_MAX = 75
 
 
 @st.cache_data
@@ -36,19 +42,29 @@ def load_data():
     preview = np.array(Image.open("preview_rgb.png"))
     with open("block_boundaries.json", encoding="utf-8-sig") as f:
         block_boundaries = {k: np.array(v) for k, v in json.load(f).items()}
-    return inventory, block_mapping, contours, preview, block_boundaries
+
+    # Final verdict per plant (output of the shading analysis, blocks 1-4)
+    verdict = pd.read_csv("verdetto_finale_4_blocchi.csv")
+    verdict['plant_id'] = verdict['plant_id'].astype(int)
+    verdict['status_original'] = verdict['classe_originale'].map(CLASS_EN)
+    verdict['status_bright'] = verdict['classe_pixel_luminosi'].map(CLASS_EN)
+    verdict['status_final'] = verdict['classe_finale'].map(CLASS_EN)
+    verdict['uncertainty'] = np.select(
+        [verdict['confidenza'] <= UNCERTAIN_MAX, verdict['confidenza'] <= MODERATE_MAX],
+        ['high', 'moderate'], default='none')
+    verdict = verdict[['plant_id', 'status_original', 'status_bright', 'status_final', 'uncertainty',
+                       'confidenza', 'affidabilita', 'distanza_soglia', 'borderline_solo_a_75']]
+    return inventory, block_mapping, contours, preview, block_boundaries, verdict
 
 
 @st.cache_data
 def compute_physical_thresholds(inventory):
     """25th/75th percentiles across the whole nursery, used to describe a
-    plant's canopy area/diameter/height as small/medium/large."""
+    plant's canopy area/diameter as small/medium/large."""
     return {
         'area_m2': (inventory['area_m2'].quantile(0.25), inventory['area_m2'].quantile(0.75)),
         'diametro_chioma_m': (inventory['diametro_chioma_m'].quantile(0.25),
                                 inventory['diametro_chioma_m'].quantile(0.75)),
-        'altezza_media_m': (inventory['altezza_media_m'].quantile(0.25),
-                             inventory['altezza_media_m'].quantile(0.75)),
     }
 
 
@@ -63,36 +79,22 @@ def size_label(value, low, high):
 
 
 def build_plant_summary(prow, thresholds):
-    """Plain-language sentence describing this plant's canopy size and height."""
+    """Plain-language sentence describing this plant's canopy size."""
     area_label = size_label(prow['area_m2'], *thresholds['area_m2'])
-    height_val = prow.get('altezza_media_m')
-    height_label = None
-    if pd.notna(height_val) and height_val >= 0:
-        height_label = size_label(height_val, *thresholds['altezza_media_m'])
-
-    if area_label and height_label:
-        return (f"This plant has a **{area_label} canopy** and is **{height_label}** "
+    if area_label:
+        return (f"This plant has a **{area_label} canopy** "
                 f"compared to other plants in the nursery.")
-    elif area_label:
-        return (f"This plant has a **{area_label} canopy** compared to other plants in the "
-                f"nursery. Height data isn't available for this plant.")
     return "Not enough data to describe this plant's overall size."
 
 
-def compute_block_health(block_plant_ids, inventory):
-    df = inventory[inventory['plant_id'].isin(block_plant_ids)].copy()
-    mean_ndvi, std_ndvi = df['ndvi'].mean(), df['ndvi'].std()
-    df['ndvi_zscore'] = (df['ndvi'] - mean_ndvi) / (std_ndvi + 1e-6)
-
-    def classify(z):
-        if z < SOGLIA_STRESS:
-            return 'stressed'
-        elif z > SOGLIA_OTTIMALE:
-            return 'vigorous'
-        return 'normal'
-
-    df['health_status'] = df['ndvi_zscore'].apply(classify)
-    return df, mean_ndvi, std_ndvi
+def build_block_health(block_plant_ids, inventory, verdict):
+    """NDVI statistics of the block + final health verdict of each plant (from the shading analysis)."""
+    df = inventory[inventory['plant_id'].isin(block_plant_ids)][['plant_id', 'ndvi', 'tir_mean']].merge(
+        verdict, on='plant_id', how='left')
+    n_not_assessed = int(df['status_final'].isna().sum())
+    df['status_final'] = df['status_final'].fillna('not assessed')
+    df['uncertainty'] = df['uncertainty'].fillna('none')
+    return df, df['ndvi'].mean(), df['ndvi'].std(), n_not_assessed
 
 
 def explain_block_variability(mean_ndvi, std_ndvi, min_ndvi, max_ndvi, low_confidence):
@@ -131,8 +133,19 @@ def compute_cwsi(t_plant, t_ref_healthy, t_dry):
     return float(np.clip(cwsi, 0, 1))
 
 
+def _centroids(subset, c_min_p, r_min_p):
+    cx, cy, ids, hover = [], [], [], []
+    for _, row in subset.iterrows():
+        c = row['geometry'].centroid
+        cx.append(c.x / ORTHO_SCALE - c_min_p)
+        cy.append(c.y / ORTHO_SCALE - r_min_p)
+        ids.append(int(row['plant_id']))
+        hover.append(f"Plant {int(row['plant_id'])}")
+    return cx, cy, ids, hover
+
+
 def build_zoom_figure(selected_block, block_boundaries, preview_img, color_by_status=False,
-                       block_contours=None):
+                       block_contours=None, show_moderate=False):
     pad = 0.15
     rows_full = block_boundaries[selected_block][:, 0]
     cols_full = block_boundaries[selected_block][:, 1]
@@ -149,7 +162,7 @@ def build_zoom_figure(selected_block, block_boundaries, preview_img, color_by_st
     fig.add_trace(go.Image(z=crop))
 
     if color_by_status:
-        groups = {status: block_contours[block_contours['health_status'] == status]
+        groups = {status: block_contours[block_contours['status_final'] == status]
                   for status in STATUS_COLORS}
         color_map = STATUS_COLORS
     else:
@@ -157,29 +170,42 @@ def build_zoom_figure(selected_block, block_boundaries, preview_img, color_by_st
         color_map = {'plant': '#3498db'}
 
     for status, subset in groups.items():
+        if subset.empty:
+            continue
         color = color_map[status]
         xs, ys = [], []
-        cx, cy, ids, hover = [], [], [], []
         for _, row in subset.iterrows():
             coords = np.array(row['geometry'].exterior.coords) / ORTHO_SCALE
             xs.extend((coords[:, 0] - c_min_p).tolist() + [None])
             ys.extend((coords[:, 1] - r_min_p).tolist() + [None])
-            c = row['geometry'].centroid
-            cx.append(c.x / ORTHO_SCALE - c_min_p)
-            cy.append(c.y / ORTHO_SCALE - r_min_p)
-            ids.append(int(row['plant_id']))
-            hover.append(f"Plant {int(row['plant_id'])}")
+        cx, cy, ids, hover = _centroids(subset, c_min_p, r_min_p)
 
         fig.add_trace(go.Scatter(
             x=xs, y=ys, mode='lines', fill='toself',
             line=dict(color=color, width=1), fillcolor=color, opacity=0.5,
             hoverinfo='skip', showlegend=color_by_status, name=status.capitalize()
         ))
-        if ids:
+        fig.add_trace(go.Scatter(
+            x=cx, y=cy, mode='markers',
+            marker=dict(size=10, color=color, line=dict(color='black', width=1)),
+            customdata=ids, hovertext=hover, hoverinfo='text', showlegend=False
+        ))
+
+    # Uncertainty markers: a ring around the plant's marker
+    if color_by_status:
+        rings = [('high', 'Uncertain verdict', 22, 3)]
+        if show_moderate:
+            rings.append(('moderate', 'Somewhat uncertain', 18, 1.5))
+        for level, label, size, width in rings:
+            subset = block_contours[block_contours['uncertainty'] == level]
+            if subset.empty:
+                continue
+            cx, cy, ids, hover = _centroids(subset, c_min_p, r_min_p)
             fig.add_trace(go.Scatter(
                 x=cx, y=cy, mode='markers',
-                marker=dict(size=10, color=color, line=dict(color='black', width=1)),
-                customdata=ids, hovertext=hover, hoverinfo='text', showlegend=False
+                marker=dict(symbol='circle', size=size, color='rgba(0,0,0,0)',
+                            line=dict(color='black' if level == 'high' else '#555555', width=width)),
+                customdata=ids, hoverinfo='skip', showlegend=True, name=label
             ))
 
     fig.update_layout(
@@ -200,23 +226,51 @@ def extract_selected_id(event):
     return None
 
 
+def describe_uncertainty(prow):
+    """Plain-language box about how stable this plant's verdict is with respect to canopy shading."""
+    orig, bright, final = prow['status_original'], prow['status_bright'], prow['status_final']
+    level = prow['uncertainty']
+    if level == 'high':
+        msg = (f"⚠️ **Uncertain verdict.** Inside the canopy of this plant, the sunlit and the shaded "
+               f"leaves give different results. Using all the canopy the plant is **{orig}**; "
+               f"using only its sunlit half it is **{bright}**.")
+        if final != orig:
+            msg += f" We therefore report it as **{final}**, but the verdict should be taken with caution."
+        else:
+            msg += f" Both versions agree on **{final}** for the final verdict, but it is close to a class boundary."
+        st.warning(msg)
+    elif level == 'moderate':
+        msg = ("🔸 **Fairly stable verdict.** In 3 of the 4 light levels inside the canopy the plant gets the "
+               "same status; in the remaining one it is classified differently.")
+        if bool(prow['borderline_solo_a_75']):
+            msg += " This plant is close to a class boundary, so it may switch with a small change in the data."
+        st.info(msg)
+    else:
+        st.success("✅ **Reliable verdict.** The plant gets the same status in all four light levels inside its canopy "
+                   "(from the darkest to the brightest part).")
+
+
 # --- Load data ---
-inventory, block_mapping, contours, preview_img, block_boundaries = load_data()
+inventory, block_mapping, contours, preview_img, block_boundaries, verdict = load_data()
 T_DRY_GLOBAL = inventory['tir_mean'].quantile(0.99)
 PHYSICAL_THRESHOLDS = compute_physical_thresholds(inventory)
 
 st.title("🌿 Nursery — Exploratory Demo")
 
-available_blocks = sorted(block_mapping['blocco'].unique())
+available_blocks = [b for b in sorted(block_mapping['blocco'].unique()) if b in block_boundaries]
+skipped_blocks = sorted(set(block_mapping['blocco'].unique()) - set(available_blocks))
+if skipped_blocks:
+    st.warning(f"Blocks without a boundary in block_boundaries.json are hidden: {', '.join(map(str, skipped_blocks))}")
 selected_block = st.selectbox("Select a block", available_blocks)
 
 block_ids = block_mapping[block_mapping['blocco'] == selected_block]['plant_id']
-block_health, mean_ndvi, std_ndvi = compute_block_health(block_ids, inventory)
+block_health, mean_ndvi, std_ndvi, n_not_assessed = build_block_health(block_ids, inventory, verdict)
 low_confidence = std_ndvi < STD_MINIMA_AFFIDABILE
-counts = block_health['health_status'].value_counts()
+counts = block_health['status_final'].value_counts()
+n_uncertain = int((block_health['uncertainty'] == 'high').sum())
 
 block_contours = contours[contours['plant_id'].isin(block_ids)].merge(
-    block_health[['plant_id', 'ndvi', 'ndvi_zscore', 'health_status', 'tir_mean']], on='plant_id'
+    block_health[['plant_id', 'ndvi', 'status_final', 'uncertainty', 'tir_mean']], on='plant_id'
 )
 
 if "plant_inventory" not in st.session_state:
@@ -270,23 +324,13 @@ with tab1:
             st.subheader(f"Plant {pid} — physical characteristics")
             st.write(build_plant_summary(prow, PHYSICAL_THRESHOLDS))
 
-            c1, c2, c3 = st.columns(3)
+            c1, c2 = st.columns(2)
             with c1:
                 st.metric("Canopy area", f"{prow['area_m2']:.2f} m²")
                 st.caption("The ground area covered by this plant's foliage, seen from above.")
             with c2:
                 st.metric("Crown diameter", f"{prow['diametro_chioma_m']:.2f} m")
                 st.caption("The width of the canopy — how wide the plant spreads.")
-            with c3:
-                if pd.notna(prow.get('altezza_media_m')) and prow['altezza_media_m'] >= 0:
-                    confidence_label = prow['confidenza_altezza'] if pd.notna(prow.get('confidenza_altezza')) else "n/a"
-                    st.metric("Height", f"{prow['altezza_media_m']:.2f} m",
-                              help=f"Reliability of this measurement: {confidence_label}")
-                    st.caption(f"Estimated from drone elevation data. Reliability: {confidence_label}.")
-                else:
-                    st.metric("Height", "n/a")
-                    st.caption("Height couldn't be reliably measured for this plant "
-                               "(e.g. due to limited elevation data coverage).")
 
 # ============================================================
 # TAB 2 — health status
@@ -304,6 +348,19 @@ with tab2:
         st.write(f"🟢 Vigorous: {counts.get('vigorous', 0)}  ·  "
                  f"🟡 Normal: {counts.get('normal', 0)}  ·  "
                  f"🔴 Possibly stressed: {counts.get('stressed', 0)}")
+        st.write(f"⭕ Uncertain verdict (depends on light inside the canopy): **{n_uncertain}**")
+        if n_not_assessed:
+            st.caption(f"{n_not_assessed} plants in this block could not be assessed (too few canopy pixels).")
+        show_moderate = st.checkbox("Also mark somewhat uncertain plants (3 of 4 light levels agree)", value=False)
+        with st.expander("How is the uncertainty computed?"):
+            st.markdown(
+                "Parts of a canopy are lit and parts are in shade, and shade changes the colour signal. "
+                "For every plant we split its canopy into **four light levels** (darkest to brightest quarter) and "
+                "recompute the health status in each. If the status is the same in all four, the verdict is reliable. "
+                "If it changes in at least half of them, the plant is marked as **uncertain** (black ring) and its "
+                "status is recomputed using only the **sunlit half** of the canopy. "
+                "The other plants keep the verdict computed on the whole canopy."
+            )
         boundary = block_boundaries[selected_block] / ORTHO_SCALE
         bx = boundary[:, 1].tolist() + [boundary[0, 1]]
         by = boundary[:, 0].tolist() + [boundary[0, 0]]
@@ -323,7 +380,8 @@ with tab2:
     with col_zoom2:
         st.subheader(f"Zoom on {selected_block} — click a plant")
         fig_zoom_health = build_zoom_figure(selected_block, block_boundaries, preview_img,
-                                              color_by_status=True, block_contours=block_contours)
+                                              color_by_status=True, block_contours=block_contours,
+                                              show_moderate=show_moderate)
         event_health = st.plotly_chart(fig_zoom_health, use_container_width=True,
                                          on_select="rerun", key="zoom_health")
         pid = extract_selected_id(event_health)
@@ -337,9 +395,15 @@ with tab2:
             prow = prow.iloc[0]
             st.markdown("---")
             st.subheader(f"Plant {pid} — health status")
-            c1, c2 = st.columns(2)
-            c1.metric("Status", prow['health_status'].capitalize())
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Status", prow['status_final'].capitalize())
             c2.metric("Leaf temperature", f"{prow['tir_mean']:.1f}°C" if pd.notna(prow['tir_mean']) else "n/a")
+            c3.metric("Verdict reliability", RELIABILITY_EN.get(prow['affidabilita'], "n/a"))
+
+            if prow['status_final'] == 'not assessed':
+                st.info("This plant could not be assessed (too few canopy pixels).")
+            else:
+                describe_uncertainty(prow)
 
             st.markdown("---")
             st.subheader("🌡️ Additional check: leaf temperature")
@@ -360,7 +424,7 @@ with tab2:
                     st.info(f"No temperature data available for plant {pid} — cannot run this check.")
                 else:
                     cwsi_says_stressed = cwsi > CWSI_STRESS_THRESHOLD
-                    ndvi_says_stressed = prow['health_status'] == 'stressed'
+                    ndvi_says_stressed = prow['status_final'] == 'stressed'
                     st.metric("Water stress index (CWSI)", f"{cwsi:.2f}",
                               help="0 = no water stress, 1 = maximum water stress")
 
